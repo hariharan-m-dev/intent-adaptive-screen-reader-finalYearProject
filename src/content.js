@@ -204,5 +204,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ stopped: true });
   }
 
+  if (message.type === 'IASR_PAUSE_RESUME') {
+    if (IASR_Speech.isPaused()) {
+      IASR_Speech.resume();
+      sendResponse({ paused: false });
+    } else if (IASR_Speech.isSpeaking()) {
+      IASR_Speech.pause();
+      sendResponse({ paused: true });
+    } else {
+      sendResponse({ paused: false, noActiveSpeech: true });
+    }
+  }
+
   return true; // keep the message channel open for async sendResponse
 });

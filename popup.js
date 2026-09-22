@@ -3,6 +3,7 @@ const blocksArea = document.getElementById('blocksArea');
 const analyzeBtn = document.getElementById('analyzeBtn');
 const jumpBtn = document.getElementById('jumpBtn');
 const speakBtn = document.getElementById('speakBtn');
+const pauseBtn = document.getElementById('pauseBtn');
 const stopBtn = document.getElementById('stopBtn');
 
 let lastBlocks = [];
@@ -61,6 +62,7 @@ jumpBtn.addEventListener('click', async () => {
   try {
     chrome.tabs.sendMessage(tab.id, { type: 'IASR_JUMP_AND_READ' }, (result) => {
       if (chrome.runtime.lastError || !result) return;
+      pauseBtn.textContent = 'Pause';
       // Update block list to show which block is now active (startIndex).
       renderBlocks(result.blocks, result.startIndex);
     });
@@ -72,6 +74,7 @@ speakBtn.addEventListener('click', async () => {
   try {
     chrome.tabs.sendMessage(tab.id, { type: 'IASR_SPEAK' }, (result) => {
       if (chrome.runtime.lastError || !result) return;
+      pauseBtn.textContent = 'Pause';
       // If this was the first run (speak before analyze), populate the UI now.
       if (result.blocks && result.blocks.length) {
         renderIntent(result);
@@ -81,10 +84,22 @@ speakBtn.addEventListener('click', async () => {
   } catch (e) { /* restricted page or content script not ready */ }
 });
 
+pauseBtn.addEventListener('click', async () => {
+  const tab = await getActiveTab();
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'IASR_PAUSE_RESUME' }, (result) => {
+      if (chrome.runtime.lastError || !result || result.noActiveSpeech) return;
+      pauseBtn.textContent = result.paused ? 'Resume' : 'Pause';
+    });
+  } catch (e) { /* restricted page or content script not ready */ }
+});
+
 stopBtn.addEventListener('click', async () => {
   const tab = await getActiveTab();
   try {
-    chrome.tabs.sendMessage(tab.id, { type: 'IASR_STOP' }, () => {});
+    chrome.tabs.sendMessage(tab.id, { type: 'IASR_STOP' }, () => {
+      pauseBtn.textContent = 'Pause';
+    });
   } catch (e) { /* restricted page or content script not ready */ }
 });
 

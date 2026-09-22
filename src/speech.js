@@ -44,5 +44,21 @@ const IASR_Speech = (() => {
     currentIndex = -1;
   }
 
-  return { speakOrderedBlocks, stop };
+  function pause() {
+    if (window.speechSynthesis.speaking) window.speechSynthesis.pause();
+  }
+
+  function resume() {
+    if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+  }
+
+  function isPaused() {
+    return window.speechSynthesis.paused;
+  }
+
+  function isSpeaking() {
+    return window.speechSynthesis.speaking;
+  }
+
+  return { speakOrderedBlocks, stop, pause, resume, isPaused, isSpeaking };
 })();
