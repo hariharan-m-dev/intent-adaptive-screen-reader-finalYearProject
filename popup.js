@@ -12,7 +12,7 @@ function renderIntent(result) {
   const queryLine = result.searchQuery
     ? `<div class="confidence">detected search: "${result.searchQuery}"</div>`
     : '';
-  const scoreLabel = result.intent === 'search_results' ? '' :
+  const scoreLabel = (result.intent === 'search_results' || result.intent === 'shopping_listing') ? '' :
     `<div class="confidence">intent score: ${result.confidence.toFixed(1)}</div>`;
   intentArea.innerHTML = `
     <div class="${badgeClass}">${result.intent.replace('_', ' ')}</div>

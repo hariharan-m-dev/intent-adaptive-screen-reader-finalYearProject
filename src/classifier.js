@@ -14,7 +14,7 @@
 
 const IASR_Classifier = (() => {
 
-  const INTENTS = ['shopping', 'job_search', 'news', 'form_filling', 'qa_reference', 'search_results', 'unknown'];
+  const INTENTS = ['shopping', 'shopping_listing', 'job_search', 'news', 'form_filling', 'qa_reference', 'search_results', 'unknown'];
 
   function scoreShopping(f) {
     let score = 0;
@@ -92,6 +92,40 @@ const IASR_Classifier = (() => {
       return {
         intent: 'search_results',
         scores: { search_results: 100 },
+        confidence: 100
+      };
+    }
+
+    // Structured-data short-circuits (schema.org JSON-LD / Open Graph):
+    // protocol-based, not site-based, so these generalize across any site
+    // that follows SEO conventions rather than needing per-site tuning.
+    // Checked before the DOM heuristics below, which stay as a fallback
+    // for sites that don't emit structured data.
+    const structured = features.structured;
+    if (structured) {
+      if (structured.listing && structured.listing.items.length >= 2) {
+        return { intent: 'shopping_listing', scores: { shopping_listing: 100 }, confidence: 100 };
+      }
+      if (structured.product) {
+        return { intent: 'shopping', scores: { shopping: 100 }, confidence: 100 };
+      }
+      if (structured.job) {
+        return { intent: 'job_search', scores: { job_search: 100 }, confidence: 100 };
+      }
+      if (structured.article) {
+        return { intent: 'news', scores: { news: 100 }, confidence: 100 };
+      }
+    }
+
+    // Deterministic short-circuit: a product LISTING page (many product
+    // cards, e.g. a Flipkart/Amazon search) is not a single-product page —
+    // the single-product reordering rules (first h1/price on the page)
+    // don't apply and previously grabbed arbitrary unrelated content.
+    // Fallback for sites without structured data.
+    if (features.listing && features.listing.isProductListing) {
+      return {
+        intent: 'shopping_listing',
+        scores: { shopping_listing: 100 },
         confidence: 100
       };
     }

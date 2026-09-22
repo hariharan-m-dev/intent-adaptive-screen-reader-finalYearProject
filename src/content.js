@@ -78,16 +78,28 @@ function serializableBlocks(blocks) {
 }
 
 /**
- * Scroll the given DOM element into view and apply a brief yellow-outline
- * highlight so the user can see where reading will start.
- * The highlight is removed after 2 s so it doesn't linger.
+ * Scroll the given DOM element into view and apply a yellow-outline
+ * highlight. The highlight persists until the next block starts (or speech
+ * ends/stops) rather than a fixed timer, so it stays visible for exactly as
+ * long as that block is being narrated.
  */
+let IASR_highlightedEl = null;
+let IASR_highlightedPrevOutline = '';
+
+function clearHighlight() {
+  if (IASR_highlightedEl) {
+    IASR_highlightedEl.style.outline = IASR_highlightedPrevOutline;
+    IASR_highlightedEl = null;
+  }
+}
+
 function scrollAndHighlight(el) {
   if (!el) return;
+  clearHighlight();
   el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  const prev = el.style.outline;
+  IASR_highlightedPrevOutline = el.style.outline;
   el.style.outline = '3px solid #f5a623';
-  setTimeout(() => { el.style.outline = prev; }, 2000);
+  IASR_highlightedEl = el;
 }
 
 async function runPipeline() {
@@ -129,6 +141,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const pipelinePromise = isFirstRun ? runPipeline() : Promise.resolve(IASR_lastResult);
     pipelinePromise.then(result => {
       IASR_Speech.speakOrderedBlocks(result.blocks, (progress) => {
+        // Highlight the page section currently being spoken, if it has a
+        // live anchorEl (most blocks do; structured-data-only blocks don't).
+        if (progress.done) {
+          clearHighlight();
+        } else if (progress.block && progress.block.anchorEl) {
+          scrollAndHighlight(progress.block.anchorEl);
+        }
         try {
           chrome.runtime.sendMessage({ type: 'IASR_PROGRESS', progress }).catch(() => {});
         } catch (e) { /* popup closed or context invalidated */ }
@@ -154,6 +173,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       // Start speech from that block, not from index 0.
       IASR_Speech.speakOrderedBlocks(result.blocks.slice(startIndex), (progress) => {
+        // Highlight each block's page section as it's spoken, same as
+        // normal "Read" — not just the initial jump target.
+        if (progress.done) {
+          clearHighlight();
+        } else if (progress.block && progress.block.anchorEl) {
+          scrollAndHighlight(progress.block.anchorEl);
+        }
         // Offset progress index so the popup highlights the right block.
         const offsetProgress = progress.done
           ? { done: true, index: -1 }
@@ -174,6 +200,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'IASR_STOP') {
     IASR_Speech.stop();
+    clearHighlight();
     sendResponse({ stopped: true });
   }
 

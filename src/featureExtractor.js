@@ -171,6 +171,158 @@ const IASR_FeatureExtractor = (() => {
     return { isSearchResultsPage: false, engine: null };
   }
 
+  /**
+   * Detects a product LISTING/search-results page (e.g. a Flipkart/Amazon
+   * "?q=camera" search), as opposed to a single-product detail page.
+   * Class-name-independent on purpose: e-commerce sites use hashed/obfuscated
+   * class names, so instead of matching selectors we look for the structural
+   * fingerprint of a product grid — multiple distinct anchors that each
+   * contain both descriptive text and a price. This matters because the
+   * single-product reordering rules (first h1 / first price on the page)
+   * are meaningless on a listing page with dozens of products, and previously
+   * picked up arbitrary unrelated page text (filters, footer, etc.).
+   */
+  const LISTING_PRICE_RE = /[$₹€£]\s?\d[\d,]*(\.\d{2})?/;
+  function getListingSignals() {
+    const root = getMainContentRoot();
+    const anchors = Array.from(root.querySelectorAll('a[href]'));
+    const seen = new Set();
+    let cardCount = 0;
+    for (const a of anchors) {
+      const text = (a.innerText || '').trim();
+      if (!text || text.length < 10 || text.length > 300) continue;
+      if (!LISTING_PRICE_RE.test(text)) continue;
+      const href = a.getAttribute('href');
+      if (!href || seen.has(href)) continue;
+      seen.add(href);
+      cardCount += 1;
+    }
+    return { cardCount, isProductListing: cardCount >= 4 };
+  }
+
+  function getMeta(property) {
+    const el = document.querySelector(`meta[property="${property}"], meta[name="${property}"]`);
+    return el ? el.getAttribute('content') : null;
+  }
+
+  function normalizeTypes(t) {
+    if (!t) return [];
+    return (Array.isArray(t) ? t : [t]).map(x => String(x).toLowerCase());
+  }
+
+  // Recursively flattens JSON-LD (handles @graph wrappers and arrays) into
+  // a flat list of typed objects.
+  function flattenJsonLd(node, out) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(n => flattenJsonLd(n, out)); return; }
+    if (node['@graph']) flattenJsonLd(node['@graph'], out);
+    if (node['@type']) out.push(node);
+  }
+
+  function extractProduct(obj) {
+    let price = '';
+    let availability = '';
+    const offer = Array.isArray(obj.offers) ? obj.offers[0] : obj.offers;
+    if (offer) {
+      const rawPrice = offer.price || (offer.priceSpecification && offer.priceSpecification.price) || '';
+      price = rawPrice ? `${offer.priceCurrency || ''} ${rawPrice}`.trim() : '';
+      availability = (offer.availability || '').split('/').pop() || '';
+    }
+    let rating = '';
+    if (obj.aggregateRating) {
+      const r = obj.aggregateRating;
+      rating = `${r.ratingValue || ''}${r.reviewCount ? ` (${r.reviewCount} reviews)` : ''}`.trim();
+    }
+    return { name: obj.name || '', price, rating, availability };
+  }
+
+  function extractItemList(obj) {
+    const elements = Array.isArray(obj.itemListElement) ? obj.itemListElement : [];
+    // Not capped to a handful — this is used as a name lookup dictionary
+    // matched against DOM hrefs, not the final displayed list, and sites
+    // commonly list 20-40+ organic entries here (which also often excludes
+    // sponsored placements, so it's unsafe to use for reading ORDER).
+    const items = elements.slice(0, 50).map(el => {
+      const item = el.item || el;
+      const offer = Array.isArray(item.offers) ? item.offers[0] : item.offers;
+      return { name: item.name || el.name || '', url: item.url || el.url || '', price: offer && offer.price ? offer.price : '' };
+    }).filter(i => i.name);
+    return { count: items.length, items };
+  }
+
+  function extractArticle(obj) {
+    let author = '';
+    if (obj.author) {
+      const a = Array.isArray(obj.author) ? obj.author[0] : obj.author;
+      author = (a && a.name) || (typeof a === 'string' ? a : '') || '';
+    }
+    return { headline: obj.headline || obj.name || '', author, datePublished: obj.datePublished || '' };
+  }
+
+  function extractJob(obj) {
+    let salary = '';
+    if (obj.baseSalary && obj.baseSalary.value) {
+      const v = obj.baseSalary.value;
+      salary = `${v.minValue || v.value || ''}${v.maxValue ? '-' + v.maxValue : ''} ${obj.baseSalary.currency || ''}`.trim();
+    }
+    return { title: obj.title || '', salary, deadline: obj.validThrough || '' };
+  }
+
+  /**
+   * Reads schema.org structured data (JSON-LD) and Open Graph meta tags.
+   * Unlike DOM/class-name heuristics, this is protocol-based: any site that
+   * follows SEO conventions (most real e-commerce/news/job sites do, for
+   * Google rich snippets) exposes it the same way regardless of its visual
+   * markup or hashed class names, so this generalizes across sites rather
+   * than needing per-site tuning. Falls back to null fields when absent —
+   * callers should fall back to the DOM heuristics in that case.
+   */
+  function getStructuredDataSignals() {
+    const result = { product: null, listing: null, article: null, job: null };
+    const items = [];
+    document.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+      try { flattenJsonLd(JSON.parse(s.textContent), items); } catch (e) { /* malformed JSON-LD, skip */ }
+    });
+
+    for (const obj of items) {
+      const types = normalizeTypes(obj['@type']);
+      if (!result.product && types.includes('product')) result.product = extractProduct(obj);
+      if (!result.listing && types.includes('itemlist')) result.listing = extractItemList(obj);
+      if (!result.article && types.some(t => ['newsarticle', 'article', 'blogposting'].includes(t))) result.article = extractArticle(obj);
+      if (!result.job && types.includes('jobposting')) result.job = extractJob(obj);
+    }
+
+    // Some sites emit several standalone Product entries instead of one
+    // ItemList wrapper — that's still a listing signal.
+    if (!result.listing) {
+      const products = items.filter(o => normalizeTypes(o['@type']).includes('product'));
+      if (products.length >= 2) {
+        result.listing = {
+          count: products.length,
+          items: products.slice(0, 5).map(p => {
+            const offer = Array.isArray(p.offers) ? p.offers[0] : p.offers;
+            return { name: p.name || '', price: offer && offer.price ? offer.price : '' };
+          })
+        };
+      }
+    }
+
+    // Open Graph fallback for a single product when no JSON-LD is present.
+    if (!result.product) {
+      const ogType = getMeta('og:type');
+      if (ogType && /product/i.test(ogType)) {
+        const name = getMeta('og:title') || (document.querySelector('h1') ? document.querySelector('h1').innerText : '');
+        const rawPrice = getMeta('product:price:amount') || getMeta('og:price:amount');
+        const currency = getMeta('product:price:currency') || getMeta('og:price:currency') || '';
+        if (name || rawPrice) {
+          result.product = { name, price: rawPrice ? `${currency} ${rawPrice}`.trim() : '', rating: '', availability: getMeta('product:availability') || '' };
+        }
+      }
+    }
+
+    return result;
+  }
+
   function extract() {
     const bodyText = getBodyText();
     return {
@@ -187,6 +339,8 @@ const IASR_FeatureExtractor = (() => {
       qa: getQaSignals(),
       query: getQuerySignals(),
       searchEngine: getSearchEngineSignals(),
+      listing: getListingSignals(),
+      structured: getStructuredDataSignals(),
       bodyTextLength: bodyText.length
     };
   }
