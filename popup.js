@@ -1,6 +1,7 @@
 const intentArea = document.getElementById('intentArea');
 const blocksArea = document.getElementById('blocksArea');
 const analyzeBtn = document.getElementById('analyzeBtn');
+const jumpBtn = document.getElementById('jumpBtn');
 const speakBtn = document.getElementById('speakBtn');
 const stopBtn = document.getElementById('stopBtn');
 
@@ -11,9 +12,11 @@ function renderIntent(result) {
   const queryLine = result.searchQuery
     ? `<div class="confidence">detected search: "${result.searchQuery}"</div>`
     : '';
+  const scoreLabel = result.intent === 'search_results' ? '' :
+    `<div class="confidence">intent score: ${result.confidence.toFixed(1)}</div>`;
   intentArea.innerHTML = `
     <div class="${badgeClass}">${result.intent.replace('_', ' ')}</div>
-    <div class="confidence">confidence score: ${result.confidence.toFixed(1)}</div>
+    ${scoreLabel}
     ${queryLine}
   `;
 }
@@ -22,8 +25,13 @@ function renderBlocks(blocks, activeIndex = -1) {
   lastBlocks = blocks;
   if (!blocks.length) {
     blocksArea.innerHTML = '<div class="empty">No content extracted yet. Click "Analyze this page".</div>';
+    jumpBtn.style.display = 'none';
     return;
   }
+  // Show the jump button only when at least one query-match block exists.
+  const hasMatch = blocks.some(b => b.label === 'Matches your search');
+  jumpBtn.style.display = hasMatch ? 'block' : 'none';
+
   blocksArea.innerHTML = blocks.map((b, i) => `
     <div class="block ${i === activeIndex ? 'active' : ''}">
       <span class="label">${b.label}</span>
@@ -39,21 +47,45 @@ async function getActiveTab() {
 
 analyzeBtn.addEventListener('click', async () => {
   const tab = await getActiveTab();
-  chrome.tabs.sendMessage(tab.id, { type: 'IASR_ANALYZE' }, (result) => {
-    if (!result) return;
-    renderIntent(result);
-    renderBlocks(result.blocks);
-  });
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'IASR_ANALYZE' }, (result) => {
+      if (chrome.runtime.lastError || !result) return;
+      renderIntent(result);
+      renderBlocks(result.blocks);
+    });
+  } catch (e) { /* restricted page or content script not ready */ }
+});
+
+jumpBtn.addEventListener('click', async () => {
+  const tab = await getActiveTab();
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'IASR_JUMP_AND_READ' }, (result) => {
+      if (chrome.runtime.lastError || !result) return;
+      // Update block list to show which block is now active (startIndex).
+      renderBlocks(result.blocks, result.startIndex);
+    });
+  } catch (e) { /* restricted page or content script not ready */ }
 });
 
 speakBtn.addEventListener('click', async () => {
   const tab = await getActiveTab();
-  chrome.tabs.sendMessage(tab.id, { type: 'IASR_SPEAK' }, () => {});
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'IASR_SPEAK' }, (result) => {
+      if (chrome.runtime.lastError || !result) return;
+      // If this was the first run (speak before analyze), populate the UI now.
+      if (result.blocks && result.blocks.length) {
+        renderIntent(result);
+        renderBlocks(result.blocks);
+      }
+    });
+  } catch (e) { /* restricted page or content script not ready */ }
 });
 
 stopBtn.addEventListener('click', async () => {
   const tab = await getActiveTab();
-  chrome.tabs.sendMessage(tab.id, { type: 'IASR_STOP' }, () => {});
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'IASR_STOP' }, () => {});
+  } catch (e) { /* restricted page or content script not ready */ }
 });
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -67,12 +99,16 @@ chrome.runtime.onMessage.addListener((message) => {
 (async () => {
   const tab = await getActiveTab();
   if (!tab) return;
-  chrome.tabs.sendMessage(tab.id, { type: 'IASR_ANALYZE' }, (result) => {
-    if (chrome.runtime.lastError || !result) {
-      blocksArea.innerHTML = '<div class="empty">Reload the page after installing the extension, then try again.</div>';
-      return;
-    }
-    renderIntent(result);
-    renderBlocks(result.blocks);
-  });
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'IASR_ANALYZE' }, (result) => {
+      if (chrome.runtime.lastError || !result) {
+        blocksArea.innerHTML = '<div class="empty">Reload the page after installing the extension, then try again.</div>';
+        return;
+      }
+      renderIntent(result);
+      renderBlocks(result.blocks);
+    });
+  } catch (e) {
+    blocksArea.innerHTML = '<div class="empty">Reload the page after installing the extension, then try again.</div>';
+  }
 })();

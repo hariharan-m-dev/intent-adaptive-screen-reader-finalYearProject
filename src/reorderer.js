@@ -103,10 +103,11 @@ const IASR_Reorderer = (() => {
 
   function buildFormOrder() {
     const blocks = [];
-    const labels = Array.from(document.querySelectorAll('label'))
+    const root = getRoot();
+    const labels = Array.from(root.querySelectorAll('label'))
       .map(l => textOf(l))
       .filter(Boolean);
-    const requiredFields = Array.from(document.querySelectorAll('[required], [aria-required="true"]'))
+    const requiredFields = Array.from(root.querySelectorAll('[required], [aria-required="true"]'))
       .map(el => el.getAttribute('name') || el.getAttribute('id') || el.type)
       .filter(Boolean);
 
@@ -163,6 +164,11 @@ const IASR_Reorderer = (() => {
    * match(es) FIRST, ahead of the normal intent-based order. This is what
    * makes reordering respect "what you were actually looking for" instead
    * of just "what kind of page this is."
+   *
+   * Each returned block carries an `anchorEl` property — the live DOM node
+   * that scored highest. This lets content.js scroll the page to that
+   * element and begin reading from there. anchorEl is a DOM reference and
+   * must be stripped before sending any block over a message boundary.
    */
   function buildQueryMatchBlocks(keywords) {
     if (!keywords || !keywords.length) return [];
@@ -177,15 +183,18 @@ const IASR_Reorderer = (() => {
       keywords.forEach(kw => {
         if (lower.includes(kw)) hits += 1;
       });
-      return hits > 0 ? { text, hits } : null;
+      return hits > 0 ? { el, text, hits } : null;
     }).filter(Boolean);
 
     if (!scored.length) return [];
 
     scored.sort((a, b) => b.hits - a.hits);
-    return scored.slice(0, 2).map(s => ({
+    return scored.slice(0, 2).map((s, i) => ({
       label: 'Matches your search',
-      text: s.text.length > 220 ? s.text.slice(0, 220) + '…' : s.text
+      text: s.text.length > 220 ? s.text.slice(0, 220) + '…' : s.text,
+      // anchorEl is only meaningful in the content-script context.
+      // Strip it before serializing over chrome.runtime.sendMessage.
+      anchorEl: i === 0 ? s.el : null
     }));
   }
 

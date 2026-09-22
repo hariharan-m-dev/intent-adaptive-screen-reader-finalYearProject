@@ -3,7 +3,10 @@
   "name": "Intent-Adaptive Screen Reader",
   "version": "1.0.0",
   "description": "Predicts a webpage's task-type and dynamically reorders audio output to prioritize what matters most for that task.",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "webNavigation"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "Intent-Adaptive Screen Reader"
