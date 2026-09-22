@@ -7,6 +7,7 @@ const pauseBtn = document.getElementById('pauseBtn');
 const stopBtn = document.getElementById('stopBtn');
 
 let lastBlocks = [];
+let lastHasJumpTarget = false;
 
 function renderIntent(result) {
   const badgeClass = result.intent === 'unknown' ? 'intent-badge unknown' : 'intent-badge';
@@ -22,16 +23,15 @@ function renderIntent(result) {
   `;
 }
 
-function renderBlocks(blocks, activeIndex = -1) {
+function renderBlocks(blocks, activeIndex = -1, hasJumpTarget = lastHasJumpTarget) {
   lastBlocks = blocks;
+  lastHasJumpTarget = hasJumpTarget;
   if (!blocks.length) {
     blocksArea.innerHTML = '<div class="empty">No content extracted yet. Click "Analyze this page".</div>';
     jumpBtn.style.display = 'none';
     return;
   }
-  // Show the jump button only when at least one query-match block exists.
-  const hasMatch = blocks.some(b => b.label === 'Matches your search');
-  jumpBtn.style.display = hasMatch ? 'block' : 'none';
+  jumpBtn.style.display = hasJumpTarget ? 'block' : 'none';
 
   blocksArea.innerHTML = blocks.map((b, i) => `
     <div class="block ${i === activeIndex ? 'active' : ''}">
@@ -52,7 +52,7 @@ analyzeBtn.addEventListener('click', async () => {
     chrome.tabs.sendMessage(tab.id, { type: 'IASR_ANALYZE' }, (result) => {
       if (chrome.runtime.lastError || !result) return;
       renderIntent(result);
-      renderBlocks(result.blocks);
+      renderBlocks(result.blocks, -1, result.hasJumpTarget);
     });
   } catch (e) { /* restricted page or content script not ready */ }
 });
@@ -64,7 +64,7 @@ jumpBtn.addEventListener('click', async () => {
       if (chrome.runtime.lastError || !result) return;
       pauseBtn.textContent = 'Pause';
       // Update block list to show which block is now active (startIndex).
-      renderBlocks(result.blocks, result.startIndex);
+      renderBlocks(result.blocks, result.startIndex, result.hasMatch);
     });
   } catch (e) { /* restricted page or content script not ready */ }
 });
@@ -78,7 +78,7 @@ speakBtn.addEventListener('click', async () => {
       // If this was the first run (speak before analyze), populate the UI now.
       if (result.blocks && result.blocks.length) {
         renderIntent(result);
-        renderBlocks(result.blocks);
+        renderBlocks(result.blocks, -1, result.hasJumpTarget);
       }
     });
   } catch (e) { /* restricted page or content script not ready */ }
@@ -122,7 +122,7 @@ chrome.runtime.onMessage.addListener((message) => {
         return;
       }
       renderIntent(result);
-      renderBlocks(result.blocks);
+      renderBlocks(result.blocks, -1, result.hasJumpTarget);
     });
   } catch (e) {
     blocksArea.innerHTML = '<div class="empty">Reload the page after installing the extension, then try again.</div>';

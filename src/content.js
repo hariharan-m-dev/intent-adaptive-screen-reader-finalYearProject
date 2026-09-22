@@ -132,6 +132,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'IASR_ANALYZE') {
     runPipeline().then(result => sendResponse({
       ...result,
+      hasJumpTarget: result.blocks.some(b => b.anchorEl),
       blocks: serializableBlocks(result.blocks)
     }));
   }
@@ -153,7 +154,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } catch (e) { /* popup closed or context invalidated */ }
       });
       sendResponse(isFirstRun
-        ? { started: true, intent: result.intent, confidence: result.confidence, searchQuery: result.searchQuery, blocks: serializableBlocks(result.blocks) }
+        ? { started: true, intent: result.intent, confidence: result.confidence, searchQuery: result.searchQuery, hasJumpTarget: result.blocks.some(b => b.anchorEl), blocks: serializableBlocks(result.blocks) }
         : { started: true, intent: result.intent }
       );
     });
