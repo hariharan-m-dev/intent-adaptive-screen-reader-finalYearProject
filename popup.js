@@ -105,6 +105,7 @@ stopBtn.addEventListener('click', async () => {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'IASR_PROGRESS') {
+    if (!lastBlocks.length) return;
     const { done, index } = message.progress;
     renderBlocks(lastBlocks, done ? -1 : index);
   }
